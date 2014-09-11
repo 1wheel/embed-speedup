@@ -9,9 +9,8 @@ Build version of d3 with only the required components.
 
 - [ ] Get SMASH working
 - [ ] Make minimal copies of d3
-- [ ] Scan files for 
+- [ ] Scan directory of all d3 methods use
 - [ ] Wrap in grunt/gulp/gobble
-- 
 
 in-line
 =======
