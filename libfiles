@@ -1,0 +1,1674 @@
+!function(){
+  var d3 = {version: "3.4.11"}; // semver
+import "date";
+import "style";
+import "../core/class";
+
+d3.map = function(object) {
+  var map = new d3_Map;
+  if (object instanceof d3_Map) object.forEach(function(key, value) { map.set(key, value); });
+  else for (var key in object) map.set(key, object[key]);
+  return map;
+};
+
+function d3_Map() {}
+
+d3_class(d3_Map, {
+  has: d3_map_has,
+  get: function(key) {
+    return this[d3_map_prefix + key];
+  },
+  set: function(key, value) {
+    return this[d3_map_prefix + key] = value;
+  },
+  remove: d3_map_remove,
+  keys: d3_map_keys,
+  values: function() {
+    var values = [];
+    this.forEach(function(key, value) { values.push(value); });
+    return values;
+  },
+  entries: function() {
+    var entries = [];
+    this.forEach(function(key, value) { entries.push({key: key, value: value}); });
+    return entries;
+  },
+  size: d3_map_size,
+  empty: d3_map_empty,
+  forEach: function(f) {
+    for (var key in this) if (key.charCodeAt(0) === d3_map_prefixCode) f.call(this, key.substring(1), this[key]);
+  }
+});
+
+var d3_map_prefix = "\0", // prevent collision with built-ins
+    d3_map_prefixCode = d3_map_prefix.charCodeAt(0);
+
+function d3_map_has(key) {
+  return d3_map_prefix + key in this;
+}
+
+function d3_map_remove(key) {
+  key = d3_map_prefix + key;
+  return key in this && delete this[key];
+}
+
+function d3_map_keys() {
+  var keys = [];
+  this.forEach(function(key) { keys.push(key); });
+  return keys;
+}
+
+function d3_map_size() {
+  var size = 0;
+  for (var key in this) if (key.charCodeAt(0) === d3_map_prefixCode) ++size;
+  return size;
+}
+
+function d3_map_empty() {
+  for (var key in this) if (key.charCodeAt(0) === d3_map_prefixCode) return false;
+  return true;
+}
+import "map";
+
+d3.nest = function() {
+  var nest = {},
+      keys = [],
+      sortKeys = [],
+      sortValues,
+      rollup;
+
+  function map(mapType, array, depth) {
+    if (depth >= keys.length) return rollup
+        ? rollup.call(nest, array) : (sortValues
+        ? array.sort(sortValues)
+        : array);
+
+    var i = -1,
+        n = array.length,
+        key = keys[depth++],
+        keyValue,
+        object,
+        setter,
+        valuesByKey = new d3_Map,
+        values;
+
+    while (++i < n) {
+      if (values = valuesByKey.get(keyValue = key(object = array[i]))) {
+        values.push(object);
+      } else {
+        valuesByKey.set(keyValue, [object]);
+      }
+    }
+
+    if (mapType) {
+      object = mapType();
+      setter = function(keyValue, values) {
+        object.set(keyValue, map(mapType, values, depth));
+      };
+    } else {
+      object = {};
+      setter = function(keyValue, values) {
+        object[keyValue] = map(mapType, values, depth);
+      };
+    }
+
+    valuesByKey.forEach(setter);
+    return object;
+  }
+
+  function entries(map, depth) {
+    if (depth >= keys.length) return map;
+
+    var array = [],
+        sortKey = sortKeys[depth++];
+
+    map.forEach(function(key, keyMap) {
+      array.push({key: key, values: entries(keyMap, depth)});
+    });
+
+    return sortKey
+        ? array.sort(function(a, b) { return sortKey(a.key, b.key); })
+        : array;
+  }
+
+  nest.map = function(array, mapType) {
+    return map(mapType, array, 0);
+  };
+
+  nest.entries = function(array) {
+    return entries(map(d3.map, array, 0), 0);
+  };
+
+  nest.key = function(d) {
+    keys.push(d);
+    return nest;
+  };
+
+  // Specifies the order for the most-recently specified key.
+  // Note: only applies to entries. Map keys are unordered!
+  nest.sortKeys = function(order) {
+    sortKeys[keys.length - 1] = order;
+    return nest;
+  };
+
+  // Specifies the order for leaf values.
+  // Applies to both maps and entries array.
+  nest.sortValues = function(order) {
+    sortValues = order;
+    return nest;
+  };
+
+  nest.rollup = function(f) {
+    rollup = f;
+    return nest;
+  };
+
+  return nest;
+};
+import "../locale/en-US";
+
+d3.format = d3_locale_enUS.numberFormat;
+import "../math/abs";
+import "../math/trigonometry";
+import "conic";
+import "geo";
+import "projection";
+
+function d3_geo_conicConformal(φ0, φ1) {
+  var cosφ0 = Math.cos(φ0),
+      t = function(φ) { return Math.tan(π / 4 + φ / 2); },
+      n = φ0 === φ1 ? Math.sin(φ0) : Math.log(cosφ0 / Math.cos(φ1)) / Math.log(t(φ1) / t(φ0)),
+      F = cosφ0 * Math.pow(t(φ0), n) / n;
+
+  if (!n) return d3_geo_mercator;
+
+  function forward(λ, φ) {
+    if (F > 0) { if (φ < -halfπ + ε) φ = -halfπ + ε; }
+    else { if (φ > halfπ - ε) φ = halfπ - ε; }
+    var ρ = F / Math.pow(t(φ), n);
+    return [
+      ρ * Math.sin(n * λ),
+      F - ρ * Math.cos(n * λ)
+    ];
+  }
+
+  forward.invert = function(x, y) {
+    var ρ0_y = F - y,
+        ρ = d3_sgn(n) * Math.sqrt(x * x + ρ0_y * ρ0_y);
+    return [
+      Math.atan2(x, ρ0_y) / n,
+      2 * Math.atan(Math.pow(F / ρ, 1 / n)) - halfπ
+    ];
+  };
+
+  return forward;
+}
+
+(d3.geo.conicConformal = function() {
+  return d3_geo_conic(d3_geo_conicConformal);
+}).raw = d3_geo_conicConformal;
+import "../core/identity";
+import "../math/trigonometry";
+import "albers-usa";
+import "area";
+import "bounds";
+import "centroid";
+import "geo";
+import "path-area";
+import "path-bounds";
+import "path-buffer";
+import "path-centroid";
+import "path-context";
+import "projection";
+import "resample";
+import "stream";
+
+d3.geo.path = function() {
+  var pointRadius = 4.5,
+      projection,
+      context,
+      projectStream,
+      contextStream,
+      cacheStream;
+
+  function path(object) {
+    if (object) {
+      if (typeof pointRadius === "function") contextStream.pointRadius(+pointRadius.apply(this, arguments));
+      if (!cacheStream || !cacheStream.valid) cacheStream = projectStream(contextStream);
+      d3.geo.stream(object, cacheStream);
+    }
+    return contextStream.result();
+  }
+
+  path.area = function(object) {
+    d3_geo_pathAreaSum = 0;
+    d3.geo.stream(object, projectStream(d3_geo_pathArea));
+    return d3_geo_pathAreaSum;
+  };
+
+  path.centroid = function(object) {
+    d3_geo_centroidX0 = d3_geo_centroidY0 = d3_geo_centroidZ0 =
+    d3_geo_centroidX1 = d3_geo_centroidY1 = d3_geo_centroidZ1 =
+    d3_geo_centroidX2 = d3_geo_centroidY2 = d3_geo_centroidZ2 = 0;
+    d3.geo.stream(object, projectStream(d3_geo_pathCentroid));
+    return d3_geo_centroidZ2 ? [d3_geo_centroidX2 / d3_geo_centroidZ2, d3_geo_centroidY2 / d3_geo_centroidZ2]
+        : d3_geo_centroidZ1 ? [d3_geo_centroidX1 / d3_geo_centroidZ1, d3_geo_centroidY1 / d3_geo_centroidZ1]
+        : d3_geo_centroidZ0 ? [d3_geo_centroidX0 / d3_geo_centroidZ0, d3_geo_centroidY0 / d3_geo_centroidZ0]
+        : [NaN, NaN];
+  };
+
+  path.bounds = function(object) {
+    d3_geo_pathBoundsX1 = d3_geo_pathBoundsY1 = -(d3_geo_pathBoundsX0 = d3_geo_pathBoundsY0 = Infinity);
+    d3.geo.stream(object, projectStream(d3_geo_pathBounds));
+    return [[d3_geo_pathBoundsX0, d3_geo_pathBoundsY0], [d3_geo_pathBoundsX1, d3_geo_pathBoundsY1]];
+  };
+
+  path.projection = function(_) {
+    if (!arguments.length) return projection;
+    projectStream = (projection = _) ? _.stream || d3_geo_pathProjectStream(_) : d3_identity;
+    return reset();
+  };
+
+  path.context = function(_) {
+    if (!arguments.length) return context;
+    contextStream = (context = _) == null ? new d3_geo_pathBuffer : new d3_geo_pathContext(_);
+    if (typeof pointRadius !== "function") contextStream.pointRadius(pointRadius);
+    return reset();
+  };
+
+  path.pointRadius = function(_) {
+    if (!arguments.length) return pointRadius;
+    pointRadius = typeof _ === "function" ? _ : (contextStream.pointRadius(+_), +_);
+    return path;
+  };
+
+  function reset() {
+    cacheStream = null;
+    return path;
+  }
+
+  return path.projection(d3.geo.albersUsa()).context(null);
+};
+
+function d3_geo_pathProjectStream(project) {
+  var resample = d3_geo_resample(function(x, y) { return project([x * d3_degrees, y * d3_degrees]); });
+  return function(stream) { return d3_geo_projectionRadians(resample(stream)); };
+}
+import "../core/functor";
+import "../math/abs";
+import "geom";
+import "point";
+
+d3.geom.quadtree = function(points, x1, y1, x2, y2) {
+  var x = d3_geom_pointX,
+      y = d3_geom_pointY,
+      compat;
+
+  // For backwards-compatibility.
+  if (compat = arguments.length) {
+    x = d3_geom_quadtreeCompatX;
+    y = d3_geom_quadtreeCompatY;
+    if (compat === 3) {
+      y2 = y1;
+      x2 = x1;
+      y1 = x1 = 0;
+    }
+    return quadtree(points);
+  }
+
+  function quadtree(data) {
+    var d,
+        fx = d3_functor(x),
+        fy = d3_functor(y),
+        xs,
+        ys,
+        i,
+        n,
+        x1_,
+        y1_,
+        x2_,
+        y2_;
+
+    if (x1 != null) {
+      x1_ = x1, y1_ = y1, x2_ = x2, y2_ = y2;
+    } else {
+      // Compute bounds, and cache points temporarily.
+      x2_ = y2_ = -(x1_ = y1_ = Infinity);
+      xs = [], ys = [];
+      n = data.length;
+      if (compat) for (i = 0; i < n; ++i) {
+        d = data[i];
+        if (d.x < x1_) x1_ = d.x;
+        if (d.y < y1_) y1_ = d.y;
+        if (d.x > x2_) x2_ = d.x;
+        if (d.y > y2_) y2_ = d.y;
+        xs.push(d.x);
+        ys.push(d.y);
+      } else for (i = 0; i < n; ++i) {
+        var x_ = +fx(d = data[i], i),
+            y_ = +fy(d, i);
+        if (x_ < x1_) x1_ = x_;
+        if (y_ < y1_) y1_ = y_;
+        if (x_ > x2_) x2_ = x_;
+        if (y_ > y2_) y2_ = y_;
+        xs.push(x_);
+        ys.push(y_);
+      }
+    }
+
+    // Squarify the bounds.
+    var dx = x2_ - x1_,
+        dy = y2_ - y1_;
+    if (dx > dy) y2_ = y1_ + dx;
+    else x2_ = x1_ + dy;
+
+    // Recursively inserts the specified point p at the node n or one of its
+    // descendants. The bounds are defined by [x1, x2] and [y1, y2].
+    function insert(n, d, x, y, x1, y1, x2, y2) {
+      if (isNaN(x) || isNaN(y)) return; // ignore invalid points
+      if (n.leaf) {
+        var nx = n.x,
+            ny = n.y;
+        if (nx != null) {
+          // If the point at this leaf node is at the same position as the new
+          // point we are adding, we leave the point associated with the
+          // internal node while adding the new point to a child node. This
+          // avoids infinite recursion.
+          if ((abs(nx - x) + abs(ny - y)) < .01) {
+            insertChild(n, d, x, y, x1, y1, x2, y2);
+          } else {
+            var nPoint = n.point;
+            n.x = n.y = n.point = null;
+            insertChild(n, nPoint, nx, ny, x1, y1, x2, y2);
+            insertChild(n, d, x, y, x1, y1, x2, y2);
+          }
+        } else {
+          n.x = x, n.y = y, n.point = d;
+        }
+      } else {
+        insertChild(n, d, x, y, x1, y1, x2, y2);
+      }
+    }
+
+    // Recursively inserts the specified point [x, y] into a descendant of node
+    // n. The bounds are defined by [x1, x2] and [y1, y2].
+    function insertChild(n, d, x, y, x1, y1, x2, y2) {
+      // Compute the split point, and the quadrant in which to insert p.
+      var sx = (x1 + x2) * .5,
+          sy = (y1 + y2) * .5,
+          right = x >= sx,
+          bottom = y >= sy,
+          i = (bottom << 1) + right;
+
+      // Recursively insert into the child node.
+      n.leaf = false;
+      n = n.nodes[i] || (n.nodes[i] = d3_geom_quadtreeNode());
+
+      // Update the bounds as we recurse.
+      if (right) x1 = sx; else x2 = sx;
+      if (bottom) y1 = sy; else y2 = sy;
+      insert(n, d, x, y, x1, y1, x2, y2);
+    }
+
+    // Create the root node.
+    var root = d3_geom_quadtreeNode();
+
+    root.add = function(d) {
+      insert(root, d, +fx(d, ++i), +fy(d, i), x1_, y1_, x2_, y2_);
+    };
+
+    root.visit = function(f) {
+      d3_geom_quadtreeVisit(f, root, x1_, y1_, x2_, y2_);
+    };
+
+    // Insert all points.
+    i = -1;
+    if (x1 == null) {
+      while (++i < n) {
+        insert(root, data[i], xs[i], ys[i], x1_, y1_, x2_, y2_);
+      }
+      --i; // index of last insertion
+    } else data.forEach(root.add);
+
+    // Discard captured fields.
+    xs = ys = data = d = null;
+
+    return root;
+  }
+
+  quadtree.x = function(_) {
+    return arguments.length ? (x = _, quadtree) : x;
+  };
+
+  quadtree.y = function(_) {
+    return arguments.length ? (y = _, quadtree) : y;
+  };
+
+  quadtree.extent = function(_) {
+    if (!arguments.length) return x1 == null ? null : [[x1, y1], [x2, y2]];
+    if (_ == null) x1 = y1 = x2 = y2 = null;
+    else x1 = +_[0][0], y1 = +_[0][1], x2 = +_[1][0], y2 = +_[1][1];
+    return quadtree;
+  };
+
+  quadtree.size = function(_) {
+    if (!arguments.length) return x1 == null ? null : [x2 - x1, y2 - y1];
+    if (_ == null) x1 = y1 = x2 = y2 = null;
+    else x1 = y1 = 0, x2 = +_[0], y2 = +_[1];
+    return quadtree;
+  };
+
+  return quadtree;
+};
+
+function d3_geom_quadtreeCompatX(d) { return d.x; }
+function d3_geom_quadtreeCompatY(d) { return d.y; }
+
+function d3_geom_quadtreeNode() {
+  return {
+    leaf: true,
+    nodes: [],
+    point: null,
+    x: null,
+    y: null
+  };
+}
+
+function d3_geom_quadtreeVisit(f, node, x1, y1, x2, y2) {
+  if (!f(node, x1, y1, x2, y2)) {
+    var sx = (x1 + x2) * .5,
+        sy = (y1 + y2) * .5,
+        children = node.nodes;
+    if (children[0]) d3_geom_quadtreeVisit(f, children[0], x1, y1, sx, sy);
+    if (children[1]) d3_geom_quadtreeVisit(f, children[1], sx, y1, x2, sy);
+    if (children[2]) d3_geom_quadtreeVisit(f, children[2], x1, sy, sx, y2);
+    if (children[3]) d3_geom_quadtreeVisit(f, children[3], sx, sy, x2, y2);
+  }
+}
+import "../behavior/drag";
+import "../core/identity";
+import "../core/rebind";
+import "../event/event";
+import "../event/dispatch";
+import "../event/timer";
+import "../geom/quadtree";
+import "layout";
+
+// A rudimentary force layout using Gauss-Seidel.
+d3.layout.force = function() {
+  var force = {},
+      event = d3.dispatch("start", "tick", "end"),
+      size = [1, 1],
+      drag,
+      alpha,
+      friction = .9,
+      linkDistance = d3_layout_forceLinkDistance,
+      linkStrength = d3_layout_forceLinkStrength,
+      charge = -30,
+      chargeDistance2 = d3_layout_forceChargeDistance2,
+      gravity = .1,
+      theta2 = .64,
+      nodes = [],
+      links = [],
+      distances,
+      strengths,
+      charges;
+
+  function repulse(node) {
+    return function(quad, x1, _, x2) {
+      if (quad.point !== node) {
+        var dx = quad.cx - node.x,
+            dy = quad.cy - node.y,
+            dw = x2 - x1,
+            dn = dx * dx + dy * dy;
+
+        /* Barnes-Hut criterion. */
+        if (dw * dw / theta2 < dn) {
+          if (dn < chargeDistance2) {
+            var k = quad.charge / dn;
+            node.px -= dx * k;
+            node.py -= dy * k;
+          }
+          return true;
+        }
+
+        if (quad.point && dn && dn < chargeDistance2) {
+          var k = quad.pointCharge / dn;
+          node.px -= dx * k;
+          node.py -= dy * k;
+        }
+      }
+      return !quad.charge;
+    };
+  }
+
+  force.tick = function() {
+    // simulated annealing, basically
+    if ((alpha *= .99) < .005) {
+      event.end({type: "end", alpha: alpha = 0});
+      return true;
+    }
+
+    var n = nodes.length,
+        m = links.length,
+        q,
+        i, // current index
+        o, // current object
+        s, // current source
+        t, // current target
+        l, // current distance
+        k, // current force
+        x, // x-distance
+        y; // y-distance
+
+    // gauss-seidel relaxation for links
+    for (i = 0; i < m; ++i) {
+      o = links[i];
+      s = o.source;
+      t = o.target;
+      x = t.x - s.x;
+      y = t.y - s.y;
+      if (l = (x * x + y * y)) {
+        l = alpha * strengths[i] * ((l = Math.sqrt(l)) - distances[i]) / l;
+        x *= l;
+        y *= l;
+        t.x -= x * (k = s.weight / (t.weight + s.weight));
+        t.y -= y * k;
+        s.x += x * (k = 1 - k);
+        s.y += y * k;
+      }
+    }
+
+    // apply gravity forces
+    if (k = alpha * gravity) {
+      x = size[0] / 2;
+      y = size[1] / 2;
+      i = -1; if (k) while (++i < n) {
+        o = nodes[i];
+        o.x += (x - o.x) * k;
+        o.y += (y - o.y) * k;
+      }
+    }
+
+    // compute quadtree center of mass and apply charge forces
+    if (charge) {
+      d3_layout_forceAccumulate(q = d3.geom.quadtree(nodes), alpha, charges);
+      i = -1; while (++i < n) {
+        if (!(o = nodes[i]).fixed) {
+          q.visit(repulse(o));
+        }
+      }
+    }
+
+    // position verlet integration
+    i = -1; while (++i < n) {
+      o = nodes[i];
+      if (o.fixed) {
+        o.x = o.px;
+        o.y = o.py;
+      } else {
+        o.x -= (o.px - (o.px = o.x)) * friction;
+        o.y -= (o.py - (o.py = o.y)) * friction;
+      }
+    }
+
+    event.tick({type: "tick", alpha: alpha});
+  };
+
+  force.nodes = function(x) {
+    if (!arguments.length) return nodes;
+    nodes = x;
+    return force;
+  };
+
+  force.links = function(x) {
+    if (!arguments.length) return links;
+    links = x;
+    return force;
+  };
+
+  force.size = function(x) {
+    if (!arguments.length) return size;
+    size = x;
+    return force;
+  };
+
+  force.linkDistance = function(x) {
+    if (!arguments.length) return linkDistance;
+    linkDistance = typeof x === "function" ? x : +x;
+    return force;
+  };
+
+  // For backwards-compatibility.
+  force.distance = force.linkDistance;
+
+  force.linkStrength = function(x) {
+    if (!arguments.length) return linkStrength;
+    linkStrength = typeof x === "function" ? x : +x;
+    return force;
+  };
+
+  force.friction = function(x) {
+    if (!arguments.length) return friction;
+    friction = +x;
+    return force;
+  };
+
+  force.charge = function(x) {
+    if (!arguments.length) return charge;
+    charge = typeof x === "function" ? x : +x;
+    return force;
+  };
+
+  force.chargeDistance = function(x) {
+    if (!arguments.length) return Math.sqrt(chargeDistance2);
+    chargeDistance2 = x * x;
+    return force;
+  };
+
+  force.gravity = function(x) {
+    if (!arguments.length) return gravity;
+    gravity = +x;
+    return force;
+  };
+
+  force.theta = function(x) {
+    if (!arguments.length) return Math.sqrt(theta2);
+    theta2 = x * x;
+    return force;
+  };
+
+  force.alpha = function(x) {
+    if (!arguments.length) return alpha;
+
+    x = +x;
+    if (alpha) { // if we're already running
+      if (x > 0) alpha = x; // we might keep it hot
+      else alpha = 0; // or, next tick will dispatch "end"
+    } else if (x > 0) { // otherwise, fire it up!
+      event.start({type: "start", alpha: alpha = x});
+      d3.timer(force.tick);
+    }
+
+    return force;
+  };
+
+  force.start = function() {
+    var i,
+        n = nodes.length,
+        m = links.length,
+        w = size[0],
+        h = size[1],
+        neighbors,
+        o;
+
+    for (i = 0; i < n; ++i) {
+      (o = nodes[i]).index = i;
+      o.weight = 0;
+    }
+
+    for (i = 0; i < m; ++i) {
+      o = links[i];
+      if (typeof o.source == "number") o.source = nodes[o.source];
+      if (typeof o.target == "number") o.target = nodes[o.target];
+      ++o.source.weight;
+      ++o.target.weight;
+    }
+
+    for (i = 0; i < n; ++i) {
+      o = nodes[i];
+      if (isNaN(o.x)) o.x = position("x", w);
+      if (isNaN(o.y)) o.y = position("y", h);
+      if (isNaN(o.px)) o.px = o.x;
+      if (isNaN(o.py)) o.py = o.y;
+    }
+
+    distances = [];
+    if (typeof linkDistance === "function") for (i = 0; i < m; ++i) distances[i] = +linkDistance.call(this, links[i], i);
+    else for (i = 0; i < m; ++i) distances[i] = linkDistance;
+
+    strengths = [];
+    if (typeof linkStrength === "function") for (i = 0; i < m; ++i) strengths[i] = +linkStrength.call(this, links[i], i);
+    else for (i = 0; i < m; ++i) strengths[i] = linkStrength;
+
+    charges = [];
+    if (typeof charge === "function") for (i = 0; i < n; ++i) charges[i] = +charge.call(this, nodes[i], i);
+    else for (i = 0; i < n; ++i) charges[i] = charge;
+
+    // inherit node position from first neighbor with defined position
+    // or if no such neighbors, initialize node position randomly
+    // initialize neighbors lazily to avoid overhead when not needed
+    function position(dimension, size) {
+      if (!neighbors) {
+        neighbors = new Array(n);
+        for (j = 0; j < n; ++j) {
+          neighbors[j] = [];
+        }
+        for (j = 0; j < m; ++j) {
+          var o = links[j];
+          neighbors[o.source.index].push(o.target);
+          neighbors[o.target.index].push(o.source);
+        }
+      }
+      var candidates = neighbors[i],
+          j = -1,
+          m = candidates.length,
+          x;
+      while (++j < m) if (!isNaN(x = candidates[j][dimension])) return x;
+      return Math.random() * size;
+    }
+
+    return force.resume();
+  };
+
+  force.resume = function() {
+    return force.alpha(.1);
+  };
+
+  force.stop = function() {
+    return force.alpha(0);
+  };
+
+  // use `node.call(force.drag)` to make nodes draggable
+  force.drag = function() {
+    if (!drag) drag = d3.behavior.drag()
+        .origin(d3_identity)
+        .on("dragstart.force", d3_layout_forceDragstart)
+        .on("drag.force", dragmove)
+        .on("dragend.force", d3_layout_forceDragend);
+
+    if (!arguments.length) return drag;
+
+    this.on("mouseover.force", d3_layout_forceMouseover)
+        .on("mouseout.force", d3_layout_forceMouseout)
+        .call(drag);
+  };
+
+  function dragmove(d) {
+    d.px = d3.event.x, d.py = d3.event.y;
+    force.resume(); // restart annealing
+  }
+
+  return d3.rebind(force, event, "on");
+};
+
+// The fixed property has three bits:
+// Bit 1 can be set externally (e.g., d.fixed = true) and show persist.
+// Bit 2 stores the dragging state, from mousedown to mouseup.
+// Bit 3 stores the hover state, from mouseover to mouseout.
+// Dragend is a special case: it also clears the hover state.
+
+function d3_layout_forceDragstart(d) {
+  d.fixed |= 2; // set bit 2
+}
+
+function d3_layout_forceDragend(d) {
+  d.fixed &= ~6; // unset bits 2 and 3
+}
+
+function d3_layout_forceMouseover(d) {
+  d.fixed |= 4; // set bit 3
+  d.px = d.x, d.py = d.y; // set velocity to zero
+}
+
+function d3_layout_forceMouseout(d) {
+  d.fixed &= ~4; // unset bit 3
+}
+
+function d3_layout_forceAccumulate(quad, alpha, charges) {
+  var cx = 0,
+      cy = 0;
+  quad.charge = 0;
+  if (!quad.leaf) {
+    var nodes = quad.nodes,
+        n = nodes.length,
+        i = -1,
+        c;
+    while (++i < n) {
+      c = nodes[i];
+      if (c == null) continue;
+      d3_layout_forceAccumulate(c, alpha, charges);
+      quad.charge += c.charge;
+      cx += c.charge * c.cx;
+      cy += c.charge * c.cy;
+    }
+  }
+  if (quad.point) {
+    // jitter internal nodes that are coincident
+    if (!quad.leaf) {
+      quad.point.x += Math.random() - .5;
+      quad.point.y += Math.random() - .5;
+    }
+    var k = alpha * charges[quad.point.index];
+    quad.charge += quad.pointCharge = k;
+    cx += k * quad.point.x;
+    cy += k * quad.point.y;
+  }
+  quad.cx = cx / quad.charge;
+  quad.cy = cy / quad.charge;
+}
+
+var d3_layout_forceLinkDistance = 20,
+    d3_layout_forceLinkStrength = 1,
+    d3_layout_forceChargeDistance2 = Infinity;
+import "pow";
+import "scale";
+
+d3.scale.sqrt = function() {
+  return d3.scale.pow().exponent(.5);
+};
+import "../core/array";
+import "../core/document";
+import "../core/subclass";
+import "../core/vendor";
+
+function d3_selection(groups) {
+  d3_subclass(groups, d3_selectionPrototype);
+  return groups;
+}
+
+var d3_select = function(s, n) { return n.querySelector(s); },
+    d3_selectAll = function(s, n) { return n.querySelectorAll(s); },
+    d3_selectMatcher = d3_documentElement.matches || d3_documentElement[d3_vendorSymbol(d3_documentElement, "matchesSelector")],
+    d3_selectMatches = function(n, s) { return d3_selectMatcher.call(n, s); };
+
+// Prefer Sizzle, if available.
+if (typeof Sizzle === "function") {
+  d3_select = function(s, n) { return Sizzle(s, n)[0] || null; };
+  d3_selectAll = Sizzle;
+  d3_selectMatches = Sizzle.matchesSelector;
+}
+
+d3.selection = function() {
+  return d3_selectionRoot;
+};
+
+var d3_selectionPrototype = d3.selection.prototype = [];
+
+import "select";
+import "selectAll";
+import "attr";
+import "classed";
+import "style";
+import "property";
+import "text";
+import "html";
+import "append";
+import "insert";
+import "remove";
+import "data";
+import "datum";
+import "filter";
+import "order";
+import "sort";
+import "on";
+import "each";
+import "call";
+import "empty";
+import "node";
+import "size";
+import "enter";
+
+import "transition";
+import "interrupt";
+
+// TODO fast singleton implementation?
+d3.select = function(node) {
+  var group = [typeof node === "string" ? d3_select(node, d3_document) : node];
+  group.parentNode = d3_documentElement;
+  return d3_selection([group]);
+};
+
+d3.selectAll = function(nodes) {
+  var group = d3_array(typeof nodes === "string" ? d3_selectAll(nodes, d3_document) : nodes);
+  group.parentNode = d3_documentElement;
+  return d3_selection([group]);
+};
+
+var d3_selectionRoot = d3.select(d3_documentElement);
+import "../arrays/map";
+import "../core/subclass";
+import "../core/true";
+import "../event/dispatch";
+import "../event/timer";
+import "../interpolate/ease";
+import "../selection/selection";
+
+function d3_transition(groups, id) {
+  d3_subclass(groups, d3_transitionPrototype);
+
+  groups.id = id; // Note: read-only!
+
+  return groups;
+}
+
+var d3_transitionPrototype = [],
+    d3_transitionId = 0,
+    d3_transitionInheritId,
+    d3_transitionInherit;
+
+d3_transitionPrototype.call = d3_selectionPrototype.call;
+d3_transitionPrototype.empty = d3_selectionPrototype.empty;
+d3_transitionPrototype.node = d3_selectionPrototype.node;
+d3_transitionPrototype.size = d3_selectionPrototype.size;
+
+d3.transition = function(selection) {
+  return arguments.length
+      ? (d3_transitionInheritId ? selection.transition() : selection)
+      : d3_selectionRoot.transition();
+};
+
+d3.transition.prototype = d3_transitionPrototype;
+
+import "select";
+import "selectAll";
+import "filter";
+import "attr";
+import "style";
+import "text";
+import "remove";
+import "ease";
+import "delay";
+import "duration";
+import "each";
+import "subtransition";
+import "tween";
+
+function d3_transitionNode(node, i, id, inherit) {
+  var lock = node.__transition__ || (node.__transition__ = {active: 0, count: 0}),
+      transition = lock[id];
+
+  if (!transition) {
+    var time = inherit.time;
+
+    transition = lock[id] = {
+      tween: new d3_Map,
+      time: time,
+      ease: inherit.ease,
+      delay: inherit.delay,
+      duration: inherit.duration
+    };
+
+    ++lock.count;
+
+    d3.timer(function(elapsed) {
+      var d = node.__data__,
+          ease = transition.ease,
+          delay = transition.delay,
+          duration = transition.duration,
+          timer = d3_timer_active,
+          tweened = [];
+
+      timer.t = delay + time;
+      if (delay <= elapsed) return start(elapsed - delay);
+      timer.c = start;
+
+      function start(elapsed) {
+        if (lock.active > id) return stop();
+        lock.active = id;
+        transition.event && transition.event.start.call(node, d, i);
+
+        transition.tween.forEach(function(key, value) {
+          if (value = value.call(node, d, i)) {
+            tweened.push(value);
+          }
+        });
+
+        d3.timer(function() { // defer to end of current frame
+          timer.c = tick(elapsed || 1) ? d3_true : tick;
+          return 1;
+        }, 0, time);
+      }
+
+      function tick(elapsed) {
+        if (lock.active !== id) return stop();
+
+        var t = elapsed / duration,
+            e = ease(t),
+            n = tweened.length;
+
+        while (n > 0) {
+          tweened[--n].call(node, e);
+        }
+
+        if (t >= 1) {
+          transition.event && transition.event.end.call(node, d, i);
+          return stop();
+        }
+      }
+
+      function stop() {
+        if (--lock.count) delete lock[id];
+        else delete node.__transition__;
+        return 1;
+      }
+    }, 0, time);
+  }
+}
+import "xhr";
+
+d3.json = function(url, callback) {
+  return d3_xhr(url, "application/json", d3_json, callback);
+};
+
+function d3_json(request) {
+  return JSON.parse(request.responseText);
+}
+  if (typeof define === "function" && define.amd) define(d3);
+  else if (typeof module === "object" && module.exports) module.exports = d3;
+  this.d3 = d3;
+}();
+!function() {
+  var topojson = {
+    version: "1.6.18",
+    mesh: function(topology) { return object(topology, meshArcs.apply(this, arguments)); },
+    meshArcs: meshArcs,
+    merge: function(topology) { return object(topology, mergeArcs.apply(this, arguments)); },
+    mergeArcs: mergeArcs,
+    feature: featureOrCollection,
+    neighbors: neighbors,
+    presimplify: presimplify
+  };
+
+  function stitchArcs(topology, arcs) {
+    var stitchedArcs = {},
+        fragmentByStart = {},
+        fragmentByEnd = {},
+        fragments = [],
+        emptyIndex = -1;
+
+    // Stitch empty arcs first, since they may be subsumed by other arcs.
+    arcs.forEach(function(i, j) {
+      var arc = topology.arcs[i < 0 ? ~i : i], t;
+      if (arc.length < 3 && !arc[1][0] && !arc[1][1]) {
+        t = arcs[++emptyIndex], arcs[emptyIndex] = i, arcs[j] = t;
+      }
+    });
+
+    arcs.forEach(function(i) {
+      var e = ends(i),
+          start = e[0],
+          end = e[1],
+          f, g;
+
+      if (f = fragmentByEnd[start]) {
+        delete fragmentByEnd[f.end];
+        f.push(i);
+        f.end = end;
+        if (g = fragmentByStart[end]) {
+          delete fragmentByStart[g.start];
+          var fg = g === f ? f : f.concat(g);
+          fragmentByStart[fg.start = f.start] = fragmentByEnd[fg.end = g.end] = fg;
+        } else {
+          fragmentByStart[f.start] = fragmentByEnd[f.end] = f;
+        }
+      } else if (f = fragmentByStart[end]) {
+        delete fragmentByStart[f.start];
+        f.unshift(i);
+        f.start = start;
+        if (g = fragmentByEnd[start]) {
+          delete fragmentByEnd[g.end];
+          var gf = g === f ? f : g.concat(f);
+          fragmentByStart[gf.start = g.start] = fragmentByEnd[gf.end = f.end] = gf;
+        } else {
+          fragmentByStart[f.start] = fragmentByEnd[f.end] = f;
+        }
+      } else {
+        f = [i];
+        fragmentByStart[f.start = start] = fragmentByEnd[f.end = end] = f;
+      }
+    });
+
+    function ends(i) {
+      var arc = topology.arcs[i < 0 ? ~i : i], p0 = arc[0], p1;
+      if (topology.transform) p1 = [0, 0], arc.forEach(function(dp) { p1[0] += dp[0], p1[1] += dp[1]; });
+      else p1 = arc[arc.length - 1];
+      return i < 0 ? [p1, p0] : [p0, p1];
+    }
+
+    function flush(fragmentByEnd, fragmentByStart) {
+      for (var k in fragmentByEnd) {
+        var f = fragmentByEnd[k];
+        delete fragmentByStart[f.start];
+        delete f.start;
+        delete f.end;
+        f.forEach(function(i) { stitchedArcs[i < 0 ? ~i : i] = 1; });
+        fragments.push(f);
+      }
+    }
+
+    flush(fragmentByEnd, fragmentByStart);
+    flush(fragmentByStart, fragmentByEnd);
+    arcs.forEach(function(i) { if (!stitchedArcs[i < 0 ? ~i : i]) fragments.push([i]); });
+
+    return fragments;
+  }
+
+  function meshArcs(topology, o, filter) {
+    var arcs = [];
+
+    if (arguments.length > 1) {
+      var geomsByArc = [],
+          geom;
+
+      function arc(i) {
+        var j = i < 0 ? ~i : i;
+        (geomsByArc[j] || (geomsByArc[j] = [])).push({i: i, g: geom});
+      }
+
+      function line(arcs) {
+        arcs.forEach(arc);
+      }
+
+      function polygon(arcs) {
+        arcs.forEach(line);
+      }
+
+      function geometry(o) {
+        if (o.type === "GeometryCollection") o.geometries.forEach(geometry);
+        else if (o.type in geometryType) geom = o, geometryType[o.type](o.arcs);
+      }
+
+      var geometryType = {
+        LineString: line,
+        MultiLineString: polygon,
+        Polygon: polygon,
+        MultiPolygon: function(arcs) { arcs.forEach(polygon); }
+      };
+
+      geometry(o);
+
+      geomsByArc.forEach(arguments.length < 3
+          ? function(geoms) { arcs.push(geoms[0].i); }
+          : function(geoms) { if (filter(geoms[0].g, geoms[geoms.length - 1].g)) arcs.push(geoms[0].i); });
+    } else {
+      for (var i = 0, n = topology.arcs.length; i < n; ++i) arcs.push(i);
+    }
+
+    return {type: "MultiLineString", arcs: stitchArcs(topology, arcs)};
+  }
+
+  function mergeArcs(topology, objects) {
+    var polygonsByArc = {},
+        polygons = [],
+        components = [];
+
+    objects.forEach(function(o) {
+      if (o.type === "Polygon") register(o.arcs);
+      else if (o.type === "MultiPolygon") o.arcs.forEach(register);
+    });
+
+    function register(polygon) {
+      polygon.forEach(function(ring) {
+        ring.forEach(function(arc) {
+          (polygonsByArc[arc = arc < 0 ? ~arc : arc] || (polygonsByArc[arc] = [])).push(polygon);
+        });
+      });
+      polygons.push(polygon);
+    }
+
+    function exterior(ring) {
+      return cartesianRingArea(object(topology, {type: "Polygon", arcs: [ring]}).coordinates[0]) > 0; // TODO allow spherical?
+    }
+
+    polygons.forEach(function(polygon) {
+      if (!polygon._) {
+        var component = [],
+            neighbors = [polygon];
+        polygon._ = 1;
+        components.push(component);
+        while (polygon = neighbors.pop()) {
+          component.push(polygon);
+          polygon.forEach(function(ring) {
+            ring.forEach(function(arc) {
+              polygonsByArc[arc < 0 ? ~arc : arc].forEach(function(polygon) {
+                if (!polygon._) {
+                  polygon._ = 1;
+                  neighbors.push(polygon);
+                }
+              });
+            });
+          });
+        }
+      }
+    });
+
+    polygons.forEach(function(polygon) {
+      delete polygon._;
+    });
+
+    return {
+      type: "MultiPolygon",
+      arcs: components.map(function(polygons) {
+        var arcs = [];
+
+        // Extract the exterior (unique) arcs.
+        polygons.forEach(function(polygon) {
+          polygon.forEach(function(ring) {
+            ring.forEach(function(arc) {
+              if (polygonsByArc[arc < 0 ? ~arc : arc].length < 2) {
+                arcs.push(arc);
+              }
+            });
+          });
+        });
+
+        // Stitch the arcs into one or more rings.
+        arcs = stitchArcs(topology, arcs);
+
+        // If more than one ring is returned,
+        // at most one of these rings can be the exterior;
+        // this exterior ring has the same winding order
+        // as any exterior ring in the original polygons.
+        if ((n = arcs.length) > 1) {
+          var sgn = exterior(polygons[0][0]);
+          for (var i = 0, t; i < n; ++i) {
+            if (sgn === exterior(arcs[i])) {
+              t = arcs[0], arcs[0] = arcs[i], arcs[i] = t;
+              break;
+            }
+          }
+        }
+
+        return arcs;
+      })
+    };
+  }
+
+  function featureOrCollection(topology, o) {
+    return o.type === "GeometryCollection" ? {
+      type: "FeatureCollection",
+      features: o.geometries.map(function(o) { return feature(topology, o); })
+    } : feature(topology, o);
+  }
+
+  function feature(topology, o) {
+    var f = {
+      type: "Feature",
+      id: o.id,
+      properties: o.properties || {},
+      geometry: object(topology, o)
+    };
+    if (o.id == null) delete f.id;
+    return f;
+  }
+
+  function object(topology, o) {
+    var absolute = transformAbsolute(topology.transform),
+        arcs = topology.arcs;
+
+    function arc(i, points) {
+      if (points.length) points.pop();
+      for (var a = arcs[i < 0 ? ~i : i], k = 0, n = a.length, p; k < n; ++k) {
+        points.push(p = a[k].slice());
+        absolute(p, k);
+      }
+      if (i < 0) reverse(points, n);
+    }
+
+    function point(p) {
+      p = p.slice();
+      absolute(p, 0);
+      return p;
+    }
+
+    function line(arcs) {
+      var points = [];
+      for (var i = 0, n = arcs.length; i < n; ++i) arc(arcs[i], points);
+      if (points.length < 2) points.push(points[0].slice());
+      return points;
+    }
+
+    function ring(arcs) {
+      var points = line(arcs);
+      while (points.length < 4) points.push(points[0].slice());
+      return points;
+    }
+
+    function polygon(arcs) {
+      return arcs.map(ring);
+    }
+
+    function geometry(o) {
+      var t = o.type;
+      return t === "GeometryCollection" ? {type: t, geometries: o.geometries.map(geometry)}
+          : t in geometryType ? {type: t, coordinates: geometryType[t](o)}
+          : null;
+    }
+
+    var geometryType = {
+      Point: function(o) { return point(o.coordinates); },
+      MultiPoint: function(o) { return o.coordinates.map(point); },
+      LineString: function(o) { return line(o.arcs); },
+      MultiLineString: function(o) { return o.arcs.map(line); },
+      Polygon: function(o) { return polygon(o.arcs); },
+      MultiPolygon: function(o) { return o.arcs.map(polygon); }
+    };
+
+    return geometry(o);
+  }
+
+  function reverse(array, n) {
+    var t, j = array.length, i = j - n; while (i < --j) t = array[i], array[i++] = array[j], array[j] = t;
+  }
+
+  function bisect(a, x) {
+    var lo = 0, hi = a.length;
+    while (lo < hi) {
+      var mid = lo + hi >>> 1;
+      if (a[mid] < x) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  function neighbors(objects) {
+    var indexesByArc = {}, // arc index -> array of object indexes
+        neighbors = objects.map(function() { return []; });
+
+    function line(arcs, i) {
+      arcs.forEach(function(a) {
+        if (a < 0) a = ~a;
+        var o = indexesByArc[a];
+        if (o) o.push(i);
+        else indexesByArc[a] = [i];
+      });
+    }
+
+    function polygon(arcs, i) {
+      arcs.forEach(function(arc) { line(arc, i); });
+    }
+
+    function geometry(o, i) {
+      if (o.type === "GeometryCollection") o.geometries.forEach(function(o) { geometry(o, i); });
+      else if (o.type in geometryType) geometryType[o.type](o.arcs, i);
+    }
+
+    var geometryType = {
+      LineString: line,
+      MultiLineString: polygon,
+      Polygon: polygon,
+      MultiPolygon: function(arcs, i) { arcs.forEach(function(arc) { polygon(arc, i); }); }
+    };
+
+    objects.forEach(geometry);
+
+    for (var i in indexesByArc) {
+      for (var indexes = indexesByArc[i], m = indexes.length, j = 0; j < m; ++j) {
+        for (var k = j + 1; k < m; ++k) {
+          var ij = indexes[j], ik = indexes[k], n;
+          if ((n = neighbors[ij])[i = bisect(n, ik)] !== ik) n.splice(i, 0, ik);
+          if ((n = neighbors[ik])[i = bisect(n, ij)] !== ij) n.splice(i, 0, ij);
+        }
+      }
+    }
+
+    return neighbors;
+  }
+
+  function presimplify(topology, triangleArea) {
+    var absolute = transformAbsolute(topology.transform),
+        relative = transformRelative(topology.transform),
+        heap = minAreaHeap();
+
+    if (!triangleArea) triangleArea = cartesianTriangleArea;
+
+    topology.arcs.forEach(function(arc) {
+      var triangles = [],
+          maxArea = 0,
+          triangle;
+
+      // To store each point’s effective area, we create a new array rather than
+      // extending the passed-in point to workaround a Chrome/V8 bug (getting
+      // stuck in smi mode). For midpoints, the initial effective area of
+      // Infinity will be computed in the next step.
+      for (var i = 0, n = arc.length, p; i < n; ++i) {
+        p = arc[i];
+        absolute(arc[i] = [p[0], p[1], Infinity], i);
+      }
+
+      for (var i = 1, n = arc.length - 1; i < n; ++i) {
+        triangle = arc.slice(i - 1, i + 2);
+        triangle[1][2] = triangleArea(triangle);
+        triangles.push(triangle);
+        heap.push(triangle);
+      }
+
+      for (var i = 0, n = triangles.length; i < n; ++i) {
+        triangle = triangles[i];
+        triangle.previous = triangles[i - 1];
+        triangle.next = triangles[i + 1];
+      }
+
+      while (triangle = heap.pop()) {
+        var previous = triangle.previous,
+            next = triangle.next;
+
+        // If the area of the current point is less than that of the previous point
+        // to be eliminated, use the latter's area instead. This ensures that the
+        // current point cannot be eliminated without eliminating previously-
+        // eliminated points.
+        if (triangle[1][2] < maxArea) triangle[1][2] = maxArea;
+        else maxArea = triangle[1][2];
+
+        if (previous) {
+          previous.next = next;
+          previous[2] = triangle[2];
+          update(previous);
+        }
+
+        if (next) {
+          next.previous = previous;
+          next[0] = triangle[0];
+          update(next);
+        }
+      }
+
+      arc.forEach(relative);
+    });
+
+    function update(triangle) {
+      heap.remove(triangle);
+      triangle[1][2] = triangleArea(triangle);
+      heap.push(triangle);
+    }
+
+    return topology;
+  };
+
+  function cartesianRingArea(ring) {
+    var i = -1,
+        n = ring.length,
+        a,
+        b = ring[n - 1],
+        area = 0;
+
+    while (++i < n) {
+      a = b;
+      b = ring[i];
+      area += a[0] * b[1] - a[1] * b[0];
+    }
+
+    return area * .5;
+  }
+
+  function cartesianTriangleArea(triangle) {
+    var a = triangle[0], b = triangle[1], c = triangle[2];
+    return Math.abs((a[0] - c[0]) * (b[1] - a[1]) - (a[0] - b[0]) * (c[1] - a[1]));
+  }
+
+  function compareArea(a, b) {
+    return a[1][2] - b[1][2];
+  }
+
+  function minAreaHeap() {
+    var heap = {},
+        array = [],
+        size = 0;
+
+    heap.push = function(object) {
+      up(array[object._ = size] = object, size++);
+      return size;
+    };
+
+    heap.pop = function() {
+      if (size <= 0) return;
+      var removed = array[0], object;
+      if (--size > 0) object = array[size], down(array[object._ = 0] = object, 0);
+      return removed;
+    };
+
+    heap.remove = function(removed) {
+      var i = removed._, object;
+      if (array[i] !== removed) return; // invalid request
+      if (i !== --size) object = array[size], (compareArea(object, removed) < 0 ? up : down)(array[object._ = i] = object, i);
+      return i;
+    };
+
+    function up(object, i) {
+      while (i > 0) {
+        var j = ((i + 1) >> 1) - 1,
+            parent = array[j];
+        if (compareArea(object, parent) >= 0) break;
+        array[parent._ = i] = parent;
+        array[object._ = i = j] = object;
+      }
+    }
+
+    function down(object, i) {
+      while (true) {
+        var r = (i + 1) << 1,
+            l = r - 1,
+            j = i,
+            child = array[j];
+        if (l < size && compareArea(array[l], child) < 0) child = array[j = l];
+        if (r < size && compareArea(array[r], child) < 0) child = array[j = r];
+        if (j === i) break;
+        array[child._ = i] = child;
+        array[object._ = i = j] = object;
+      }
+    }
+
+    return heap;
+  }
+
+  function transformAbsolute(transform) {
+    if (!transform) return noop;
+    var x0,
+        y0,
+        kx = transform.scale[0],
+        ky = transform.scale[1],
+        dx = transform.translate[0],
+        dy = transform.translate[1];
+    return function(point, i) {
+      if (!i) x0 = y0 = 0;
+      point[0] = (x0 += point[0]) * kx + dx;
+      point[1] = (y0 += point[1]) * ky + dy;
+    };
+  }
+
+  function transformRelative(transform) {
+    if (!transform) return noop;
+    var x0,
+        y0,
+        kx = transform.scale[0],
+        ky = transform.scale[1],
+        dx = transform.translate[0],
+        dy = transform.translate[1];
+    return function(point, i) {
+      if (!i) x0 = y0 = 0;
+      var x1 = (point[0] - dx) / kx | 0,
+          y1 = (point[1] - dy) / ky | 0;
+      point[0] = x1 - x0;
+      point[1] = y1 - y0;
+      x0 = x1;
+      y0 = y1;
+    };
+  }
+
+  function noop() {}
+
+  if (typeof define === "function" && define.amd) define(topojson);
+  else if (typeof module === "object" && module.exports) module.exports = topojson;
+  else this.topojson = topojson;
+}();
+(function() {
+  var slice = [].slice;
+
+  function queue(parallelism) {
+    var q,
+        tasks = [],
+        started = 0, // number of tasks that have been started (and perhaps finished)
+        active = 0, // number of tasks currently being executed (started but not finished)
+        remaining = 0, // number of tasks not yet finished
+        popping, // inside a synchronous task callback?
+        error = null,
+        await = noop,
+        all;
+
+    if (!parallelism) parallelism = Infinity;
+
+    function pop() {
+      while (popping = started < tasks.length && active < parallelism) {
+        var i = started++,
+            t = tasks[i],
+            a = slice.call(t, 1);
+        a.push(callback(i));
+        ++active;
+        t[0].apply(null, a);
+      }
+    }
+
+    function callback(i) {
+      return function(e, r) {
+        --active;
+        if (error != null) return;
+        if (e != null) {
+          error = e; // ignore new tasks and squelch active callbacks
+          started = remaining = NaN; // stop queued tasks from starting
+          notify();
+        } else {
+          tasks[i] = r;
+          if (--remaining) popping || pop();
+          else notify();
+        }
+      };
+    }
+
+    function notify() {
+      if (error != null) await(error);
+      else if (all) await(error, tasks);
+      else await.apply(null, [error].concat(tasks));
+    }
+
+    return q = {
+      defer: function() {
+        if (!error) {
+          tasks.push(arguments);
+          ++remaining;
+          pop();
+        }
+        return q;
+      },
+      await: function(f) {
+        await = f;
+        all = false;
+        if (!remaining) notify();
+        return q;
+      },
+      awaitAll: function(f) {
+        await = f;
+        all = true;
+        if (!remaining) notify();
+        return q;
+      }
+    };
+  }
+
+  function noop() {}
+
+  queue.version = "1.0.7";
+  if (typeof define === "function" && define.amd) define(function() { return queue; });
+  else if (typeof module === "object" && module.exports) module.exports = queue;
+  else this.queue = queue;
+})();
